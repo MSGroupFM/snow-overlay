@@ -706,6 +706,7 @@ void snow_move_ball(SnowScene *scene, float x, float y) {
     if (scene->moving_ball && x == scene->ball_x && y == scene->ball_y) return;
     scene->ball_x = x;
     scene->ball_y = y;
+    if (snow_holds_snowman(scene)) return;
     float collected = remove_snow(scene, x, y + scene->ball_radius * 0.6f,
                                   scene->ball_radius + 9, 0.65f, 0);
     scene->ball_radius = fminf(34, sqrtf(scene->ball_radius * scene->ball_radius + collected * 0.18f));

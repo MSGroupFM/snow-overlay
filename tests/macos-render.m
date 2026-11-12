@@ -437,6 +437,63 @@ static void check_ball_click_routing(bool inverted) {
     [panel close];
 }
 
+static void check_ball_exit_button(void) {
+    TrackingTestApp *app = [TrackingTestApp new];
+    SnowView *view = [[SnowView alloc] initWithScreen:(SnowRect){0, 0, 420, 320} seed:7];
+    SnowPanel *panel = make_snow_panel(NSMakeRect(90, 140, 420, 320), view);
+    [panel orderFrontRegardless];
+    app.panels = [NSMutableArray arrayWithObject:panel];
+    __weak TrackingTestApp *weakApp = app;
+    view.leaveInteraction = ^{ if (weakApp.interactive) [weakApp toggleInteraction:nil]; };
+    assert(!panel.childWindows.count);
+    [app toggleInteraction:nil];
+    NSWindow *exitPanel = panel.childWindows.firstObject;
+    assert(app.interactive && exitPanel.isVisible && !exitPanel.ignoresMouseEvents);
+    assert(NSContainsRect(panel.frame, exitPanel.frame));
+    NSButton *exit = (NSButton *)exitPanel.contentView.subviews.firstObject;
+    assert([exit isKindOfClass:NSButton.class] && [exit.title isEqualToString:@"Выйти из режима снежков"]);
+
+    SnowScene *scene = view.scene;
+    const SnowSurface edge = {7, {50, 180, 250, 60}, true, 10};
+    snow_surfaces(scene, &edge, 1);
+    scene->balls[scene->ball_count++] = (SnowBall){7, .5f, 0, 10, 0};
+    assert(snow_pick_ball(scene, 175, 170));
+    panel.ignoresMouseEvents = YES;
+    assert(!exitPanel.ignoresMouseEvents);
+    [exit performClick:nil];
+    assert(!app.interactive && !exitPanel.isVisible && !panel.childWindows.count);
+    assert(panel.ignoresMouseEvents && !scene->holding && scene->ball_count == 1);
+    [panel close];
+}
+
+static void check_ball_menu_exit(void) {
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    TrackingTestApp *app = [TrackingTestApp new];
+    [app makeMenu];
+    NSMenu *menu = app.status.menu;
+    assert([app.ballItem.title isEqualToString:@"Режим снежков"]);
+    assert([NSApp sendAction:app.ballItem.action to:app.ballItem.target from:app.ballItem]);
+    assert(app.interactive && [app.ballItem.title hasPrefix:@"Выйти из режима снежков"]);
+
+    NSStatusBarButton *icon = app.status.button;
+    NSRect frame = [icon.window convertRectToScreen:[icon convertRect:icon.bounds toView:nil]];
+    assert(!NSIsEmptyRect(frame));
+    [app externalBallMouseDownAt:NSMakePoint(NSMidX(frame), NSMidY(frame))];
+    assert(app.interactive);
+    [app menuWillOpen:menu];
+    [app externalBallMouseDownAt:NSMakePoint(NSMidX(frame), NSMinY(frame) - 50)];
+    assert(app.interactive && [app.ballItem.title hasPrefix:@"Выйти из режима снежков"]);
+    [app menuDidClose:menu];
+    assert([NSApp sendAction:app.ballItem.action to:app.ballItem.target from:app.ballItem]);
+    assert(!app.interactive && [app.ballItem.title isEqualToString:@"Режим снежков"]);
+
+    [app toggleInteraction:nil];
+    [app externalBallMouseDownAt:NSMakePoint(NSMidX(frame), NSMinY(frame) - 50)];
+    assert(!app.interactive);
+    [NSStatusBar.systemStatusBar removeStatusItem:app.status];
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyProhibited];
+}
+
 static void check_holiday_effects(bool inverted) {
     SnowView *view = [[SnowView alloc] initWithScreen:(SnowRect){0, 0, 620, 400} seed:123];
     SnowPanel *panel = make_snow_panel(NSMakeRect(90, 140, 620, 400), view);
@@ -554,6 +611,8 @@ int main(void) {
         check_cleanup_effects(true);
         check_ball_click_routing(false);
         check_ball_click_routing(true);
+        check_ball_exit_button();
+        check_ball_menu_exit();
         check_holiday_effects(false);
         check_holiday_effects(true);
         check_settings_window();

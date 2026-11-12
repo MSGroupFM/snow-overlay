@@ -22,6 +22,7 @@ typedef NS_ENUM(NSInteger, DesktopSelection) {
 @property(nonatomic) NSTimeInterval particleFrameInterval;
 @property(nonatomic) BOOL separatesDraggedDrift;
 - (instancetype)initWithScreen:(SnowRect)screen seed:(uint32_t)seed;
+- (void)setBallExitVisible:(BOOL)visible;
 - (void)hideDetachedDrift;
 - (void)beginCleanup:(SnowCleanup)style atTime:(NSTimeInterval)time;
 - (void)discardCleanup;
@@ -44,6 +45,13 @@ typedef NS_ENUM(NSInteger, DesktopSelection) {
 
 @implementation SnowPanel
 - (BOOL)canBecomeKeyWindow { return !self.ignoresMouseEvents; }
+@end
+
+@interface SnowExitButton : NSButton
+@end
+
+@implementation SnowExitButton
+- (BOOL)acceptsFirstMouse:(NSEvent *)event { return YES; }
 @end
 
 static SnowPanel *make_snow_panel(NSRect frame, SnowView *view) {
@@ -119,6 +127,7 @@ static bool update_drift_shape(DriftShape *previous, const SnowDrift *drift, boo
     CALayer *_driftGroup;
     CALayer *_ballGroup;
     SnowPanel *_driftPanel;
+    NSPanel *_ballExitPanel;
     CAShapeLayer *_detachedDrift;
     NSMutableArray<CALayer *> *_flakes;
     NSMutableArray<CAShapeLayer *> *_drifts;
@@ -198,6 +207,7 @@ static CGImageRef flake_image(void) {
 }
 - (void)viewWillMoveToWindow:(NSWindow *)newWindow {
     if (self.window != newWindow) {
+        [self setBallExitVisible:NO];
         [self hideDetachedDrift];
         [_driftPanel close];
         _driftPanel = nil;
@@ -264,6 +274,49 @@ static CGImageRef flake_image(void) {
 }
 - (void)cancelOperation:(id)sender {
     if (self.leaveInteraction) self.leaveInteraction();
+}
+
+- (void)setBallExitVisible:(BOOL)visible {
+    NSWindow *parent = self.window;
+    if (!visible || !parent.isVisible || !parent.isOnActiveSpace) {
+        [_ballExitPanel.parentWindow removeChildWindow:_ballExitPanel];
+        [_ballExitPanel orderOut:nil];
+        return;
+    }
+    if (_ballExitPanel.isVisible && _ballExitPanel.parentWindow == parent) return;
+
+    if (!_ballExitPanel) {
+        SnowExitButton *button = [SnowExitButton buttonWithTitle:@"Выйти из режима снежков"
+            target:self action:@selector(cancelOperation:)];
+        button.controlSize = NSControlSizeLarge;
+        button.toolTip = @"Esc";
+        NSSize size = button.fittingSize;
+        size.width += 12;
+        size.height = MAX(size.height, 36);
+        NSRect frame = NSMakeRect(0, 0, size.width, size.height);
+        _ballExitPanel = [[NSPanel alloc] initWithContentRect:frame
+            styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
+            backing:NSBackingStoreBuffered defer:NO];
+        _ballExitPanel.releasedWhenClosed = NO;
+        _ballExitPanel.opaque = NO;
+        _ballExitPanel.backgroundColor = NSColor.clearColor;
+        _ballExitPanel.hasShadow = NO;
+        _ballExitPanel.hidesOnDeactivate = NO;
+        _ballExitPanel.becomesKeyOnlyIfNeeded = YES;
+        _ballExitPanel.excludedFromWindowsMenu = YES;
+        _ballExitPanel.animationBehavior = NSWindowAnimationBehaviorNone;
+        button.frame = frame;
+        [_ballExitPanel.contentView addSubview:button];
+    }
+    NSRect area = parent.screen ? NSIntersectionRect(parent.frame, parent.screen.visibleFrame) : parent.frame;
+    if (NSIsEmptyRect(area)) return;
+    NSSize size = _ballExitPanel.frame.size;
+    [_ballExitPanel setFrameOrigin:NSMakePoint(MAX(NSMinX(area), NSMaxX(area) - size.width - 16),
+                                               MAX(NSMinY(area), NSMaxY(area) - size.height - 16))];
+    _ballExitPanel.level = parent.level;
+    _ballExitPanel.collectionBehavior = parent.collectionBehavior;
+    [parent addChildWindow:_ballExitPanel ordered:NSWindowAbove];
+    [_ballExitPanel orderFrontRegardless];
 }
 
 - (CGPoint)layerPointWithX:(float)x y:(float)y {
@@ -972,7 +1025,7 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
     drag->pointer = pointer;
 }
 
-@interface SnowApp : NSObject <NSApplicationDelegate>
+@interface SnowApp : NSObject <NSApplicationDelegate, NSMenuDelegate>
 @property(nonatomic) NSMutableArray<SnowPanel *> *panels;
 @property(nonatomic) NSStatusItem *status;
 @property(nonatomic) NSMenuItem *pauseItem;
@@ -1010,6 +1063,7 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
 @implementation SnowApp {
     WindowDrag _drag;
     BOOL _dragAttempted;
+    BOOL _statusMenuTracking;
     BOOL _desktopSelectionPending;
     BOOL _geometryRequestInFlight;
     uint64_t _geometryGeneration;
@@ -1110,6 +1164,7 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
     self.status.button.title = @"❄";
     self.status.button.toolTip = @"Снегопад";
     NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Снегопад"];
+    menu.delegate = self;
     self.pauseItem = [self item:@"Пауза" action:@selector(togglePause:)];
     self.ballItem = [self item:@"Режим снежков" action:@selector(toggleInteraction:)];
     [menu addItem:self.pauseItem];
@@ -1162,6 +1217,23 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
     [menu addItem:[self item:@"Выход" action:@selector(quit:)]];
     self.status.menu = menu;
     [self updateMenu];
+}
+
+- (void)menuWillOpen:(NSMenu *)menu {
+    _statusMenuTracking = YES;
+    [self updateMenu];
+}
+
+- (void)menuDidClose:(NSMenu *)menu { _statusMenuTracking = NO; }
+
+- (void)externalBallMouseDownAt:(NSPoint)point {
+    if (!self.interactive || _statusMenuTracking) return;
+    NSStatusBarButton *button = self.status.button;
+    if (button.window) {
+        NSRect icon = [button.window convertRectToScreen:[button convertRect:button.bounds toView:nil]];
+        if (NSPointInRect(point, icon)) return;
+    }
+    [self toggleInteraction:nil];
 }
 
 - (void)updateMenu {
@@ -1340,6 +1412,7 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
         panel.acceptsMouseMovedEvents = self.interactive;
         panel.ignoresMouseEvents = !self.interactive || [view shouldPassClickAt:NSEvent.mouseLocation];
         if (panel.ignoresMouseEvents && panel.isKeyWindow) [panel resignKeyWindow];
+        [view setBallExitVisible:self.interactive];
     }
     if (self.interactive) {
         NSPoint mouse = NSEvent.mouseLocation;
@@ -1359,7 +1432,9 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
                 if (event.type == NSEventTypeMouseMoved) {
                     [app updateBallClickRoutingAt:NSEvent.mouseLocation];
                 } else {
-                    [app toggleInteraction:nil];
+                    NSPoint point = event.locationInWindow;
+                    if (event.window) point = [event.window convertPointToScreen:point];
+                    [app externalBallMouseDownAt:point];
                 }
             }];
     } else if (self.externalClickMonitor) {
@@ -1497,6 +1572,7 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
             if (count == SNOW_MAX_SURFACES - 1) break;
         }
         if (fullscreen) {
+            [view setBallExitVisible:NO];
             [view hideDetachedDrift];
             [view discardCleanup];
             [view resetHolidayEffects];
@@ -1511,6 +1587,7 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
         if (_desktopSelectionPending || !panelOnDesktop || !panel.isVisible) {
             selection = [view selectDesktopAtSnowfallTime:self.snowfallTime];
             if (selection == DesktopSelectionUnavailable) {
+                [view setBallExitVisible:NO];
                 [panel orderOut:nil];
                 retryDesktopSelection = YES;
                 continue;
@@ -1534,6 +1611,10 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
                 [panel orderOut:nil];
                 retryDesktopSelection = YES;
             }
+        }
+        if (self.interactive) {
+            panel.acceptsMouseMovedEvents = YES;
+            [view setBallExitVisible:YES];
         }
     }
     _desktopSelectionPending = retryDesktopSelection;
