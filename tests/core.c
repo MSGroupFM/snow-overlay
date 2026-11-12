@@ -1,0 +1,158 @@
+#include "snow.h"
+#include <assert.h>
+#include <math.h>
+#include <stdio.h>
+
+static float mass(const SnowDrift *drift) {
+    float result = 0;
+    for (size_t i = 0; i < SNOW_BINS; i++) result += drift->height[i];
+    return result;
+}
+
+static void check_rolling_stack(void) {
+    static SnowScene scene;
+    snow_init(&scene, (SnowRect){0, 0, 700, 500}, 42);
+    const SnowSurface surface = {7, {50, 180, 500, 90}, true, 10};
+    snow_surfaces(&scene, &surface, 1);
+    scene.balls[scene.ball_count++] = (SnowBall){7, .3f, 0, 10, 0};
+    scene.balls[scene.ball_count++] = (SnowBall){7, .3f, 20, 8, 0};
+    scene.balls[scene.ball_count++] = (SnowBall){7, .3f, 36, 6, 0};
+    scene.balls[scene.ball_count++] = (SnowBall){7, .1f, 0, 7, 0};
+    assert(snow_pick_ball(&scene, 200, 170));
+    for (size_t i = 62; i < 78; i++) scene.drifts[0].height[i] = 12;
+    snow_move_ball(&scene, 325, 161);
+    assert(scene.ball_radius > 10);
+    assert(scene.ball_count == 1 && scene.balls[0].offset == .1f);
+    snow_drop_ball(&scene, 325, 161);
+    assert(scene.ball_count == 4);
+    SnowBall base = scene.balls[1];
+    assert(base.radius > 10 && base.rise == 0 && base.offset > .5f);
+    for (size_t i = 2; i < 4; i++) assert(scene.balls[i].offset == base.offset);
+    assert(snow_has_ball_at(&scene, 325, 180 - 2 * base.radius - 8 -
+                           snow_depth(&scene.drifts[0], scene.drifts[0].spans[0], 325)));
+    assert(snow_snowman_part(&scene, &scene.balls[1]) == SNOWMAN_BASE);
+    assert(snow_snowman_part(&scene, &scene.balls[2]) == SNOWMAN_BODY);
+    assert(snow_snowman_part(&scene, &scene.balls[3]) == SNOWMAN_HEAD);
+    float y = snow_ball_height(&scene, &base, 325);
+    assert(snow_pick_ball(&scene, 325, y) && snow_holds_snowman(&scene));
+    snow_drop_ball(&scene, -15, 10);
+    assert(scene.ball_count == 4 && !scene.holding);
+    float head_y = snow_ball_height(&scene, &scene.balls[3], 325);
+    assert(snow_break_ball(&scene, 325, head_y));
+    assert(scene.ball_count == 1 && scene.balls[0].offset == .1f && scene.flake_count > 20);
+}
+
+int main(void) {
+    check_rolling_stack();
+    static SnowScene scene;
+    const SnowSurface windows[] = {
+        {14, {280, 150, 160, 260}, true, 3},
+        {17, {110, 320, 610, 210}, true, 3},
+    };
+    snow_init(&scene, (SnowRect){-120, 0, 960, 640}, 42);
+    snow_surfaces(&scene, windows, 2);
+    assert(scene.drift_count == 3);
+    assert(snow_exposed(&scene, 1, 180));
+    assert(!snow_exposed(&scene, 1, 340));
+    for (int i = 0; i < 1000; i++) snow_step(&scene, 1.0f / 30, 2, 0.5f);
+    assert(mass(&scene.drifts[0]) > 0);
+    assert(mass(&scene.drifts[1]) > 0);
+    assert(mass(&scene.drifts[2]) > 0);
+    assert(scene.drifts[1].height[45] == 0);
+
+    const float old_mass = mass(&scene.drifts[0]);
+    SnowSurface moved[] = {windows[0], windows[1]};
+    moved[0].rect.x += 50;
+    moved[0].rect.y += 35;
+    snow_surfaces(&scene, moved, 2);
+    assert(mass(&scene.drifts[0]) < old_mass);
+    assert(mass(&scene.drifts[0]) > old_mass * .80f);
+    bool lifted = false;
+    for (size_t i = 0; i < scene.flake_count; i++) {
+        SnowFlake flake = scene.flakes[i];
+        if (flake.deposit > 0 && flake.vy < 0 && flake.vx > 0) lifted = true;
+    }
+    assert(lifted);
+    assert(!snow_exposed(&scene, 0, moved[0].rect.x - 1));
+    assert(!snow_exposed(&scene, 0, moved[0].rect.x + moved[0].rect.width));
+    snow_sweep(&scene, 335, 179);
+    snow_sweep(&scene, 460, 179);
+    assert(mass(&scene.drifts[0]) < old_mass);
+
+    snow_clear(&scene);
+    assert(!scene.flake_count && !scene.ball_count && mass(&scene.drifts[0]) == 0);
+    snow_begin_ball(&scene, 410, 179);
+    snow_drop_ball(&scene, 410, 179);
+    snow_begin_ball(&scene, 414, 167);
+    snow_drop_ball(&scene, 414, 167);
+    assert(scene.ball_count == 2);
+    assert(scene.balls[0].surface == moved[0].id);
+    assert(scene.balls[1].rise == 2 * scene.balls[0].radius);
+    assert(fabsf(scene.balls[0].offset - scene.balls[1].offset) < .0001f);
+    SnowBall upper = scene.balls[1];
+    float ball_x = moved[0].rect.x + upper.offset * moved[0].rect.width;
+    float ball_y = snow_ball_height(&scene, &upper, ball_x);
+    assert(snow_has_ball_at(&scene, ball_x, ball_y));
+    assert(snow_pick_ball(&scene, ball_x, ball_y) && scene.ball_count == 1);
+    snow_drop_ball(&scene, scene.screen.x - 30, 100);
+    assert(scene.ball_count == 2 && scene.balls[1].offset == upper.offset && scene.balls[1].rise == upper.rise);
+    assert(snow_pick_ball(&scene, ball_x, ball_y));
+    snow_drop_ball(&scene, 452, 179);
+    assert(scene.ball_count == 2 && scene.balls[1].offset > upper.offset);
+    assert(scene.balls[1].rise == 0 && scene.balls[1].radius == upper.radius);
+    snow_surfaces(&scene, moved + 1, 1);
+    assert(scene.ball_count == 0);
+    snow_init(&scene, (SnowRect){0, 0, 700, 500}, 19);
+    SnowSurface shelves[] = {
+        {8, {45, 95, 130, 80}, true, 3},
+        {9, {90, 250, 530, 100}, true, 3},
+        {10, {60, 375, 620, 80}, true, 3},
+    };
+    snow_surfaces(&scene, shelves, 3);
+    for (size_t i = 0; i < SNOW_BINS; i++) scene.drifts[1].height[i] = 8;
+    assert(scene.drifts[1].span_count == 1);
+    SnowSpan span = scene.drifts[1].spans[0];
+    assert(span.left >= shelves[1].rect.x);
+    assert(span.right <= shelves[1].rect.x + shelves[1].rect.width);
+    assert(snow_depth(&scene.drifts[1], span, span.left) == 0);
+    assert(snow_depth(&scene.drifts[1], span, span.right) == 0);
+    assert(snow_depth(&scene.drifts[1], span, span.left + 15) == 8);
+
+    snow_sweep(&scene, 180, 241);
+    snow_sweep(&scene, 230, 241);
+    assert(scene.flake_count > 0);
+    assert(scene.flakes[0].falling_chunk && scene.flakes[0].skip == shelves[1].id);
+    for (int i = 0; i < 28; i++) snow_step(&scene, 1.0f / 30, 0, 0);
+    assert(mass(&scene.drifts[2]) > 0);
+
+    shelves[0].rect.x = 275;
+    shelves[0].rect.y = 195;
+    float before = mass(&scene.drifts[1]);
+    snow_surfaces(&scene, shelves, 3);
+    assert(mass(&scene.drifts[1]) < before);
+    assert(scene.drifts[1].span_count == 2);
+    assert(scene.drifts[1].spans[0].right == 275);
+    assert(scene.drifts[1].spans[1].left == 405);
+    snow_init(&scene, (SnowRect){0, -100, 700, 500}, 72);
+    SnowSurface target = {32, {75, 30, 540, 100}, true, 3};
+    snow_set_inverted(&scene, true);
+    snow_surfaces(&scene, &target, 1);
+    assert(snow_screen_y(&scene, scene.drifts[0].surface.rect.y) == 130);
+    assert(snow_screen_y(&scene, snow_screen_y(&scene, 30)) == 30);
+    for (int i = 0; i < 720; i++) snow_step(&scene, 1.0f / 30, 2, 0);
+    assert(mass(&scene.drifts[0]) > 0);
+    uint64_t revision = scene.revision;
+    snow_set_inverted(&scene, false);
+    snow_surfaces(&scene, &target, 1);
+    assert(scene.drifts[0].surface.rect.y == 30);
+    assert(scene.revision > revision && scene.flake_count == 0);
+    target.corner_radius = 26;
+    snow_surfaces(&scene, &target, 1);
+    assert(!snow_exposed(&scene, 0, 100));
+    assert(snow_exposed(&scene, 0, 101));
+    assert(!snow_exposed(&scene, 0, 589));
+    target.corner_radius = 0;
+    snow_surfaces(&scene, &target, 1);
+    assert(snow_exposed(&scene, 0, 75));
+    puts("Desktop simulation passed");
+}

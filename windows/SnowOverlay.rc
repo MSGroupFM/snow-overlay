@@ -1,0 +1,28 @@
+// UTF-8 product metadata.
+#pragma code_page(65001)
+#include <winver.h>
+101 ICON "SnowOverlay.ico"
+1 24 "SnowOverlay.manifest"
+1 VERSIONINFO
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "041904B0"
+    BEGIN
+      VALUE "FileDescription", "Снегопад"
+      VALUE "FileVersion", "1.0.0"
+      VALUE "InternalName", "SnowOverlay"
+      VALUE "OriginalFilename", "SnowOverlay.exe"
+      VALUE "ProductName", "Снегопад"
+      VALUE "ProductVersion", "1.0.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0419, 1200
+  END
+END

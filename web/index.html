@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Снегопад</title>
+  <link rel="stylesheet" href="./demo.css">
+  <script type="module" src="./demo.mjs"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Снегопад</h1>
+      <p>Сметайте снег курсором или перетаскивайте полки, чтобы стряхнуть снег. В режиме снежков катайте и складывайте снежки.</p>
+    </header>
+    <section id="scene" aria-label="Демонстрация виджета">
+      <div class="shelf shelf-left" data-snow-surface></div>
+      <div class="shelf shelf-right" data-snow-surface></div>
+      <div class="shelf shelf-base" data-snow-surface></div>
+    </section>
+    <div class="controls" aria-label="Управление снегопадом">
+      <label class="field">Интенсивность
+        <select id="intensity">
+          <option value="light">Лёгкий</option>
+          <option value="steady" selected>Ровный</option>
+          <option value="blizzard">Метель</option>
+        </select>
+      </label>
+      <label class="field wind">Ветер <output id="wind-output" for="wind">Штиль</output>
+        <input id="wind" type="range" min="-1" max="1" step="0.25" value="0">
+      </label>
+      <div class="actions">
+        <button id="snowballs" type="button" aria-pressed="false">Снежки</button>
+        <button id="australia" type="button" aria-pressed="false">Австралия</button>
+        <button id="clear" type="button">Очистить</button>
+        <button id="pause" type="button">Пауза</button>
+      </div>
+    </div>
+    <p id="reduced" role="status" hidden>Снегопад остановлен системной настройкой «Уменьшение движения».</p>
+  </main>
+</body>
+</html>
