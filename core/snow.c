@@ -84,15 +84,19 @@ static void make_spans(SnowScene *scene, size_t index) {
     }
 }
 
-static void emit_chunk(SnowScene *scene, float x, float y, float removed, float vx, float vy,
-                       bool falls_through, uint64_t surface) {
-    if (removed < .12f || scene->flake_count == SNOW_MAX_FLAKES || scene->chunks_emitted >= 48) return;
+static const float chunk_gravity = 590, chunk_terminal_speed = 460;
+
+static SnowFlake *emit_chunk(SnowScene *scene, float x, float y, float removed, float vx, float vy,
+                            bool falls_through, uint64_t surface) {
+    if (removed < .12f || scene->flake_count == SNOW_MAX_FLAKES || scene->chunks_emitted >= 48) return NULL;
     scene->chunks_emitted++;
-    scene->flakes[scene->flake_count++] = (SnowFlake){
+    SnowFlake *flake = &scene->flakes[scene->flake_count++];
+    *flake = (SnowFlake){
         x, y, vx + (random_unit(scene) - .5f) * 55, vy + random_unit(scene) * 23,
         clamp(1.4f + sqrtf(removed), 1.5f, 5.1f), clamp(removed * .55f, .10f, 1.7f),
         surface, falls_through
     };
+    return flake;
 }
 
 static bool same_rect(SnowRect a, SnowRect b) {
@@ -163,6 +167,58 @@ static void scrape_drift(SnowScene *scene, SnowDrift *drift, const SnowDrift *ol
     }
 }
 
+static void collide_drift_with_sides(SnowScene *scene, size_t moving, const SnowDrift *const *previous, float elapsed) {
+    SnowDrift *drift = &scene->drifts[moving];
+    const SnowDrift *old = previous[moving];
+    if (!old->span_count) return;
+    SnowRect start = old->surface.rect, end = drift->surface.rect;
+    float dx = end.x - start.x, dy = end.y - start.y;
+    if (fabsf(dx) < .01f) return;
+
+    for (size_t i = 0; i + 1 < scene->drift_count; i++) {
+        if (i == moving || !previous[i]) continue;
+        SnowSurface obstacle = scene->drifts[i].surface;
+        SnowRect before = previous[i]->surface.rect, after = obstacle.rect;
+        if (before.width != after.width || before.height != after.height) continue;
+        float wall_dx = after.x - before.x, wall_dy = after.y - before.y;
+        float travel = dx - wall_dx;
+        if (fabsf(travel) < .01f) continue;
+        float inset = snow_edge_inset(obstacle);
+        if (2 * inset >= before.height) continue;
+        float top = before.y + inset, bottom = before.y + before.height - inset;
+        float relative_dy = dy - wall_dy;
+        if (fmaxf(start.y, start.y + relative_dy) <= top ||
+            fminf(start.y, start.y + relative_dy) - SNOW_MAX_DEPTH >= bottom) continue;
+
+        float side = travel > 0 ? before.x : before.x + before.width;
+        float left = fminf(side, side - travel), right = fmaxf(side, side - travel);
+        if (right < start.x || left > start.x + start.width) continue;
+        size_t first = bin_at(start, left), last = bin_at(start, right);
+        float last_chunk_x = -INFINITY, last_chunk_y = -INFINITY;
+        for (size_t bin = first; bin <= last; bin++) {
+            float x = start.x + (bin + .5f) * start.width / SNOW_BINS;
+            float t = (side - x) / travel;
+            if (t < 0 || t > 1 || drift->height[bin] < .10f) continue;
+            const SnowSpan *span = span_at(old, x);
+            if (!span) continue;
+            float depth = snow_depth(old, *span, x);
+            float base = start.y + relative_dy * t;
+            if (depth < .10f || base <= top || base - depth >= bottom) continue;
+            drift->height[bin] = 0;
+            drift->revision = ++scene->revision;
+
+            float contact_y = fmaxf(top, base - depth) + wall_dy * t;
+            if (x - last_chunk_x < 14 && fabsf(contact_y - last_chunk_y) < 14) continue;
+            float outward = travel > 0 ? -1 : 1;
+            float contact_x = side + wall_dx * t + outward * 5;
+            float push = clamp(fabsf(travel) * .18f / elapsed, 40, 140) * outward;
+            emit_chunk(scene, contact_x, contact_y, depth, push, 32, true, drift->surface.id);
+            last_chunk_x = x;
+            last_chunk_y = contact_y;
+        }
+    }
+}
+
 void snow_init(SnowScene *scene, SnowRect screen, uint32_t seed) {
     memset(scene, 0, sizeof *scene);
     scene->screen = screen;
@@ -211,11 +267,13 @@ void snow_surfaces(SnowScene *scene, const SnowSurface *surfaces, size_t count) 
     memcpy(scene->previous, scene->drifts, scene->drift_count * sizeof(SnowDrift));
     size_t previous_count = scene->drift_count;
     scene->drift_count = visible_count;
+    const SnowDrift *previous[SNOW_MAX_SURFACES];
     for (size_t i = 0; i < visible_count; i++) {
         SnowDrift *drift = &scene->drifts[i];
         drift->surface = visible[i];
         memset(drift->height, 0, sizeof drift->height);
         const SnowDrift *old = find_drift(scene->previous, previous_count, visible[i].id);
+        previous[i] = old;
         if (old && visible[i].catches) memcpy(drift->height, old->height, sizeof drift->height);
         make_spans(scene, i);
         bool unchanged = old && same_rect(old->surface.rect, visible[i].rect) &&
@@ -225,18 +283,19 @@ void snow_surfaces(SnowScene *scene, const SnowSurface *surfaces, size_t count) 
     }
     for (size_t i = 0; i + 1 < visible_count; i++) {
         SnowDrift *drift = &scene->drifts[i];
-        const SnowDrift *old = find_drift(scene->previous, previous_count, visible[i].id);
+        const SnowDrift *old = previous[i];
         SnowRect now = visible[i].rect;
         if (!old || old->surface.rect.width != now.width || old->surface.rect.height != now.height) continue;
         SnowRect before = old->surface.rect;
         float dx = now.x - before.x, dy = now.y - before.y;
+        collide_drift_with_sides(scene, i, previous, elapsed);
         float distance = hypotf(dx, dy);
         if (distance < 1.5f) continue;
         shake_drift(scene, drift, dx / elapsed, dy / elapsed, distance / elapsed);
         int steps = (int)ceilf(clamp(distance / 10, 1, 18));
         for (size_t j = i + 1; j < visible_count; j++) {
             SnowDrift *other = &scene->drifts[j];
-            const SnowDrift *old_other = find_drift(scene->previous, previous_count, visible[j].id);
+            const SnowDrift *old_other = previous[j];
             if (old_other && other->surface.catches) {
                 scrape_drift(scene, other, old_other, before, now, dx / elapsed, dy / elapsed, steps);
             }
@@ -315,7 +374,7 @@ void snow_step(SnowScene *scene, float dt, int intensity, float wind) {
         SnowFlake *flake = &scene->flakes[i];
         float before = flake->y;
         bool chunk = flake->deposit > 0;
-        if (chunk) flake->vy = fminf(460, flake->vy + 590 * dt);
+        if (chunk) flake->vy = fminf(chunk_terminal_speed, flake->vy + chunk_gravity * dt);
         flake->x += (flake->vx + scene->wind * (chunk ? .18f : 1)) * dt;
         flake->y += flake->vy * dt;
         if (!chunk && flake->x < screen.x) flake->x += screen.width;
@@ -605,7 +664,10 @@ bool snow_grow_snowman(SnowScene *scene, float near_x, float range, SnowBall *ba
     return true;
 }
 
-void snow_throw_snowmen(SnowScene *scene, float target_x) {
+void snow_throw_snowmen(SnowScene *scene, float target_x, float target_y) {
+    SnowRect screen = scene->screen;
+    target_x = clamp(target_x, screen.x, screen.x + screen.width);
+    target_y = clamp(target_y, screen.y, screen.y + screen.height);
     size_t throws = 0;
     for (size_t i = 0; i < scene->ball_count && throws < 4; i++) {
         const SnowBall *ball = &scene->balls[i];
@@ -615,11 +677,17 @@ void snow_throw_snowmen(SnowScene *scene, float target_x) {
         SnowRect rect = drift->surface.rect;
         float x = rect.x + ball->offset * rect.width, y = snow_ball_height(scene, ball, x);
         if (!span_at(drift, x) || !snow_point_visible(scene, drift - scene->drifts, x, y)) continue;
-        float direction = target_x < x ? -1 : 1;
-        for (int j = 0; j < 3; j++) {
-            emit_chunk(scene, x + direction * ball->radius, y + j * 3, 7,
-                       direction * (160 + 28 * j), -150 - j * 19, false, 0);
+        float dx = target_x - x, dy = target_y - y;
+        float flight = fmaxf(clamp(hypotf(dx, dy) / 680, .32f, 1.65f), dy / 390 + .08f);
+        float vy = dy / flight - .5f * chunk_gravity * flight;
+        if (vy + chunk_gravity * flight > chunk_terminal_speed) {
+            // The remaining part of the descent runs at terminal speed.
+            vy = chunk_terminal_speed - sqrtf(2 * chunk_gravity * (chunk_terminal_speed * flight - dy));
         }
+        SnowFlake *shot = emit_chunk(scene, x, y, 16, 0, 0, true, ball->surface);
+        if (!shot) break;
+        shot->vx = dx / flight - scene->wind * .18f;
+        shot->vy = vy - .01f * chunk_gravity;
         throws++;
     }
 }

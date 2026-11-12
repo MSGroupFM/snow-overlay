@@ -464,7 +464,7 @@ static void check_holiday_effects(bool inverted) {
         assert(inverted ? land.y < drop.y : land.y > drop.y);
     }
     assert(gifts >= 3);
-    [view advanceHolidayAtTime:10 + duration * .85 targetX:0];
+    [view advanceHolidayAtTime:10 + duration * .85 targetX:0 targetY:100];
     assert(scene->ball_count >= 3 && scene->ball_count <= 9);
     SnowBall head = scene->balls[2];
     unsigned appearance;
@@ -472,30 +472,69 @@ static void check_holiday_effects(bool inverted) {
     const SnowDrift *drift = snow_ball_surface(scene, &head);
     float x = drift->surface.rect.x + head.offset * drift->surface.rect.width;
     assert(snow_depth(drift, drift->spans[0], x) < 8);
-    [view advanceHolidayAtTime:11 + duration targetX:0];
+    [view advanceHolidayAtTime:11 + duration targetX:0 targetY:100];
     assert(!flight.superlayer);
-    view.mischiefDuration = 10;
-    [view startMischiefAtTime:30 nearX:x];
+    [view configureMischiefDuration:10 threshold:2];
+    [view renderWithDraggedWindow:0 horizontalOffset:0 atTime:29];
+    CALayer *headDetails = view.layer.sublayers[2].sublayers[2].sublayers.lastObject;
+    id normalHead = headDetails.contents;
+    assert(normalHead);
+    [view recordBrokenSnowmanAtTime:30 nearX:x];
     size_t flakes = scene->flake_count;
-    [view advanceHolidayAtTime:30.5 targetX:0];
-    assert(scene->flake_count > flakes);
-    flakes = scene->flake_count;
-    [view advanceHolidayAtTime:40 targetX:0];
+    [view advanceHolidayAtTime:30.5 targetX:0 targetY:100];
     assert(scene->flake_count == flakes);
+    [view renderWithDraggedWindow:0 horizontalOffset:0 atTime:30.5];
+    assert(headDetails.contents == normalHead);
+    [view recordBrokenSnowmanAtTime:31 nearX:x];
+    [view advanceHolidayAtTime:31.5 targetX:0 targetY:100];
+    assert(scene->flake_count > flakes);
+    [view renderWithDraggedWindow:0 horizontalOffset:0 atTime:31.5];
+    assert(headDetails.contents != normalHead);
+    flakes = scene->flake_count;
+    [view advanceHolidayAtTime:41 targetX:0 targetY:100];
+    assert(scene->flake_count == flakes);
+    [view renderWithDraggedWindow:0 horizontalOffset:0 atTime:41];
+    assert(headDetails.contents == normalHead);
     [view beginCleanup:SnowCleanupImmediate atTime:42];
     assert(!scene->ball_count && !scene->flake_count);
     [panel close];
 }
 
+static NSControl *find_settings_control(NSView *view, NSString *label) {
+    if (view.hidden) return nil;
+    if ([view isKindOfClass:NSButton.class] && [((NSButton *)view).title isEqualToString:label]) return (NSControl *)view;
+    if ([view isKindOfClass:NSTextField.class] && ((NSTextField *)view).isEditable &&
+        [view.accessibilityLabel isEqualToString:label]) return (NSControl *)view;
+    for (NSView *child in view.subviews) {
+        NSControl *control = find_settings_control(child, label);
+        if (control) return control;
+    }
+    return nil;
+}
+
 static void check_settings_window(void) {
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
     SnowSettingsController *settings = [SnowSettingsController new];
-    SnowPreferences preferences = {1, 0, NO, YES, 15, 5, 10};
+    SnowPreferences preferences = {1, 0, NO, YES, 15, 5, 10, 3};
     [settings showPreferences:preferences paused:NO];
     assert(settings.isWindowLoaded && settings.window.isVisible);
+    NSView *content = settings.window.contentView;
+    NSControl *disclosure = find_settings_control(content, @"Злой режим");
+    assert(disclosure && !find_settings_control(content, @"Снеговиков до включения"));
+    [disclosure performClick:nil];
+    [content layoutSubtreeIfNeeded];
+    NSControl *threshold = find_settings_control(content, @"Снеговиков до включения");
+    NSControl *duration = find_settings_control(content, @"Длительность злого режима");
+    assert(threshold && threshold.integerValue == 3 && duration && duration.integerValue == 10);
+    assert(NSContainsRect(content.bounds, [duration convertRect:duration.bounds toView:content]));
+    __block NSInteger updatedThreshold = 0;
+    settings.onChange = ^(SnowPreferences updated) { updatedThreshold = updated.mischiefThreshold; };
+    threshold.integerValue = 4;
+    [settings controlTextDidEndEditing:[NSNotification notificationWithName:NSControlTextDidEndEditingNotification object:threshold]];
+    assert(updatedThreshold == 4);
     [settings.window close];
     [settings showPreferences:preferences paused:YES];
-    assert(settings.window.isVisible);
+    assert(settings.window.isVisible && !find_settings_control(content, @"Снеговиков до включения"));
     [settings.window close];
     [NSApp setActivationPolicy:NSApplicationActivationPolicyProhibited];
 }

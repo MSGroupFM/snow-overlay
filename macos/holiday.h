@@ -283,28 +283,47 @@ static CGImageRef snowman_details(SnowmanPart part, unsigned appearance, BOOL mi
     CGContextScaleCTM(ctx, 1, -1);
     if (part == SNOWMAN_HEAD) {
         snowman_hat(ctx, appearance);
-        CGContextSetRGBFillColor(ctx, .94, .54, .60, .52);
-        CGContextFillEllipseInRect(ctx, CGRectMake(43, 61, 10, 5));
-        CGContextFillEllipseInRect(ctx, CGRectMake(77, 61, 10, 5));
-        CGContextSetRGBFillColor(ctx, mischievous ? .70 : .13, .19, .25, 1);
-        CGContextFillEllipseInRect(ctx, CGRectMake(49, 51, 7, 9));
-        CGContextFillEllipseInRect(ctx, CGRectMake(72, 51, 7, 9));
-        CGContextSetRGBFillColor(ctx, 1, 1, 1, .9);
-        CGContextFillEllipseInRect(ctx, CGRectMake(50, 52, 2.5, 2.5));
-        CGContextFillEllipseInRect(ctx, CGRectMake(73, 52, 2.5, 2.5));
         CGContextSetLineCap(ctx, kCGLineCapRound);
-        CGContextSetLineWidth(ctx, 2.5);
-        CGContextSetRGBStrokeColor(ctx, .18, .24, .32, .92);
         if (mischievous) {
-            CGContextMoveToPoint(ctx, 48, 47);
-            CGContextAddLineToPoint(ctx, 57, 51);
-            CGContextMoveToPoint(ctx, 71, 51);
-            CGContextAddLineToPoint(ctx, 80, 47);
+            for (int i = 0; i < 2; i++) {
+                CGFloat eye = 44 + i * 26;
+                CGContextSetRGBFillColor(ctx, .97, .10, .16, .30);
+                CGContextFillEllipseInRect(ctx, CGRectMake(eye - 2, 49, 21, 18));
+                CGContextSetRGBFillColor(ctx, .37, .06, .10, 1);
+                CGContextFillEllipseInRect(ctx, CGRectMake(eye, 50, 16, 13));
+                CGContextSetRGBFillColor(ctx, 1, .06, .12, 1);
+                CGContextFillEllipseInRect(ctx, CGRectMake(eye + 2, 52, 12, 9));
+                CGContextSetRGBFillColor(ctx, 1, .80, .67, 1);
+                CGContextFillEllipseInRect(ctx, CGRectMake(eye + 5, 53, 4, 3));
+            }
+            CGContextSetRGBStrokeColor(ctx, .22, .08, .14, 1);
+            CGContextSetLineWidth(ctx, 4);
+            CGContextMoveToPoint(ctx, 44, 46);
+            CGContextAddLineToPoint(ctx, 58, 53);
+            CGContextMoveToPoint(ctx, 71, 53);
+            CGContextAddLineToPoint(ctx, 85, 46);
+            CGContextStrokePath(ctx);
+            CGContextSetRGBFillColor(ctx, .24, .09, .16, 1);
+            holiday_shape(ctx, (CGPoint[]){{51,73},{59,75},{70,75},{81,71},{74,81},{62,84},{54,79}}, 7);
+            CGContextSetRGBFillColor(ctx, .97, .98, 1, 1);
+            holiday_shape(ctx, (CGPoint[]){{56,75},{62,76},{61,79}}, 3);
+            holiday_shape(ctx, (CGPoint[]){{71,75},{77,73},{73,79}}, 3);
+        } else {
+            CGContextSetRGBFillColor(ctx, .94, .54, .60, .52);
+            CGContextFillEllipseInRect(ctx, CGRectMake(43, 61, 10, 5));
+            CGContextFillEllipseInRect(ctx, CGRectMake(77, 61, 10, 5));
+            CGContextSetRGBFillColor(ctx, .13, .19, .25, 1);
+            CGContextFillEllipseInRect(ctx, CGRectMake(49, 51, 7, 9));
+            CGContextFillEllipseInRect(ctx, CGRectMake(72, 51, 7, 9));
+            CGContextSetRGBFillColor(ctx, 1, 1, 1, .9);
+            CGContextFillEllipseInRect(ctx, CGRectMake(50, 52, 2.5, 2.5));
+            CGContextFillEllipseInRect(ctx, CGRectMake(73, 52, 2.5, 2.5));
+            CGContextSetLineWidth(ctx, 2.5);
+            CGContextSetRGBStrokeColor(ctx, .18, .24, .32, .92);
+            CGContextMoveToPoint(ctx, 53, 73);
+            CGContextAddQuadCurveToPoint(ctx, 64, 85, 77, 72);
             CGContextStrokePath(ctx);
         }
-        CGContextMoveToPoint(ctx, 53, 73);
-        CGContextAddQuadCurveToPoint(ctx, 64, mischievous ? 79 : 85, 77, 72);
-        CGContextStrokePath(ctx);
         const CGPoint carrot[] = {{62, 60}, {100, 66}, {62, 72}};
         CGContextSetRGBFillColor(ctx, .96, .43, .13, 1);
         holiday_shape(ctx, carrot, 3);

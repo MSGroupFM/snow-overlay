@@ -84,7 +84,7 @@ bool snow_has_ball_at(const SnowScene *scene, float x, float y);
 bool snow_pick_ball(SnowScene *scene, float x, float y);
 SnowBreak snow_break_ball(SnowScene *scene, float x, float y);
 bool snow_grow_snowman(SnowScene *scene, float near_x, float range, SnowBall *base);
-void snow_throw_snowmen(SnowScene *scene, float target_x);
+void snow_throw_snowmen(SnowScene *scene, float target_x, float target_y);
 void snow_cancel_ball(SnowScene *scene);
 void snow_move_ball(SnowScene *scene, float x, float y);
 void snow_drop_ball(SnowScene *scene, float x, float y);

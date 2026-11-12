@@ -3,8 +3,10 @@
 typedef struct {
     NSInteger intensity, wind;
     BOOL australia, santa;
-    NSInteger cleanupMinutes, santaMinutes, mischiefSeconds;
+    NSInteger cleanupMinutes, santaMinutes, mischiefSeconds, mischiefThreshold;
 } SnowPreferences;
+
+enum { SnowMischiefMaxThreshold = 20 };
 
 static NSArray<NSString *> *snow_cleanup_titles(void) {
     return @[@"Мгновенно", @"Снегоуборочная машина", @"Порыв ветра", @"Уборка лопатой", @"Лавина", @"Оттепель", @"Удар и погоня"];
@@ -12,7 +14,8 @@ static NSArray<NSString *> *snow_cleanup_titles(void) {
 
 static SnowPreferences snow_read_preferences(NSUserDefaults *defaults) {
     [defaults registerDefaults:@{@"SnowIntensity": @1, @"SnowWind": @0, @"SnowAustralia": @NO,
-        @"SnowCleanupMinutes": @15, @"SnowSantaEnabled": @YES, @"SnowSantaMinutes": @5, @"SnowMischiefSeconds": @10}];
+        @"SnowCleanupMinutes": @15, @"SnowSantaEnabled": @YES, @"SnowSantaMinutes": @5,
+        @"SnowMischiefSeconds": @10, @"SnowMischiefThreshold": @1}];
     NSInteger cleanup = [defaults integerForKey:@"SnowCleanupMinutes"];
     if (cleanup != 0 && cleanup != 5 && cleanup != 15 && cleanup != 30) cleanup = 15;
     return (SnowPreferences){
@@ -22,7 +25,8 @@ static SnowPreferences snow_read_preferences(NSUserDefaults *defaults) {
         .santa = [defaults boolForKey:@"SnowSantaEnabled"],
         .cleanupMinutes = cleanup,
         .santaMinutes = MAX(1, MIN(120, [defaults integerForKey:@"SnowSantaMinutes"])),
-        .mischiefSeconds = MAX(0, MIN(60, [defaults integerForKey:@"SnowMischiefSeconds"]))
+        .mischiefSeconds = MAX(0, MIN(60, [defaults integerForKey:@"SnowMischiefSeconds"])),
+        .mischiefThreshold = MAX(1, MIN(SnowMischiefMaxThreshold, [defaults integerForKey:@"SnowMischiefThreshold"]))
     };
 }
 
@@ -34,6 +38,7 @@ static void snow_write_preferences(NSUserDefaults *defaults, SnowPreferences set
     [defaults setInteger:settings.cleanupMinutes forKey:@"SnowCleanupMinutes"];
     [defaults setInteger:settings.santaMinutes forKey:@"SnowSantaMinutes"];
     [defaults setInteger:settings.mischiefSeconds forKey:@"SnowMischiefSeconds"];
+    [defaults setInteger:settings.mischiefThreshold forKey:@"SnowMischiefThreshold"];
 }
 
 @interface SnowSettingsController : NSWindowController <NSTextFieldDelegate>
@@ -47,8 +52,10 @@ static void snow_write_preferences(NSUserDefaults *defaults, SnowPreferences set
 @implementation SnowSettingsController {
     NSPopUpButton *_intensity, *_wind, *_cleanup, *_effect;
     NSButton *_australia, *_santa, *_flight;
-    NSTextField *_santaMinutes, *_mischiefSeconds;
-    NSStepper *_santaStepper, *_mischiefStepper;
+    NSTextField *_santaMinutes, *_mischiefSeconds, *_mischiefThreshold;
+    NSStepper *_santaStepper, *_mischiefStepper, *_thresholdStepper;
+    NSButton *_mischiefDisclosure;
+    NSStackView *_mischiefOptions;
 }
 
 static NSTextField *settings_label(NSString *title, NSFont *font, NSColor *color) {
@@ -153,20 +160,37 @@ static NSView *settings_rule(void) {
     _santa = [NSButton checkboxWithTitle:@"Санта с подарками" target:self action:@selector(preferencesChanged:)];
     _santaMinutes = [NSTextField new];
     _mischiefSeconds = [NSTextField new];
+    _mischiefThreshold = [NSTextField new];
     _santaStepper = [NSStepper new];
     _mischiefStepper = [NSStepper new];
+    _thresholdStepper = [NSStepper new];
     _flight = [NSButton buttonWithTitle:@"Запустить Санту" target:self action:@selector(runFlight:)];
     NSButton *clear = [NSButton buttonWithTitle:@"Очистить" target:self action:@selector(runCleanup:)];
     NSStackView *clearActions = [NSStackView stackViewWithViews:@[_effect, clear]];
     clearActions.spacing = 7;
+
+    _mischiefDisclosure = [NSButton buttonWithTitle:@"Злой режим" target:self action:@selector(toggleMischiefOptions:)];
+    [_mischiefDisclosure setButtonType:NSButtonTypePushOnPushOff];
+    _mischiefDisclosure.bordered = NO;
+    _mischiefDisclosure.image = [NSImage imageWithSystemSymbolName:@"chevron.right" accessibilityDescription:nil];
+    _mischiefDisclosure.alternateImage = [NSImage imageWithSystemSymbolName:@"chevron.down" accessibilityDescription:nil];
+    _mischiefDisclosure.imagePosition = NSImageLeading;
+    _mischiefOptions = [NSStackView stackViewWithViews:@[
+        [self numberRow:@"Снеговиков до включения" field:_mischiefThreshold stepper:_thresholdStepper
+                     min:1 max:SnowMischiefMaxThreshold unit:@"шт."],
+        [self numberRow:@"Длительность злого режима" field:_mischiefSeconds stepper:_mischiefStepper
+                     min:0 max:60 unit:@"с · 0 — выкл."]]];
+    _mischiefOptions.orientation = NSUserInterfaceLayoutOrientationVertical;
+    _mischiefOptions.alignment = NSLayoutAttributeLeading;
+    _mischiefOptions.spacing = 8;
+    _mischiefOptions.hidden = YES;
 
     NSStackView *stack = [NSStackView stackViewWithViews:@[banner, snowTitle,
         settings_row(@"Интенсивность снегопада", _intensity), settings_row(@"Направление ветра", _wind),
         settings_row(@"Направление снега", _australia), settings_row(@"Автоочистка", _cleanup),
         settings_row(@"Очистить сейчас", clearActions), settings_rule(), holidayTitle, _santa,
         [self numberRow:@"Интервал пролёта" field:_santaMinutes stepper:_santaStepper min:1 max:120 unit:@"мин"],
-        [self numberRow:@"Длительность злого режима" field:_mischiefSeconds stepper:_mischiefStepper min:0 max:60 unit:@"с · 0 — выкл."],
-        _flight]];
+        _flight, _mischiefDisclosure, _mischiefOptions]];
     stack.orientation = NSUserInterfaceLayoutOrientationVertical;
     stack.alignment = NSLayoutAttributeLeading;
     stack.spacing = 9;
@@ -187,6 +211,7 @@ static NSView *settings_rule(void) {
     _santa.state = preferences.santa;
     _santaMinutes.integerValue = _santaStepper.integerValue = preferences.santaMinutes;
     _mischiefSeconds.integerValue = _mischiefStepper.integerValue = preferences.mischiefSeconds;
+    _mischiefThreshold.integerValue = _thresholdStepper.integerValue = preferences.mischiefThreshold;
     _santaMinutes.enabled = _santaStepper.enabled = preferences.santa;
     _flight.enabled = !paused;
     _flight.toolTip = paused ? @"Сначала возобновите снегопад" : @"Запустить один пролёт сейчас";
@@ -194,6 +219,10 @@ static NSView *settings_rule(void) {
 
 - (void)showPreferences:(SnowPreferences)preferences paused:(BOOL)paused {
     if (!self.window) [self loadWindow];
+    if (!self.window.isVisible) {
+        _mischiefDisclosure.state = NSControlStateValueOff;
+        [self toggleMischiefOptions:_mischiefDisclosure];
+    }
     [self refresh:preferences paused:paused];
     [self showWindow:nil];
     if (@available(macOS 14.0, *)) [NSApp activate];
@@ -201,15 +230,21 @@ static NSView *settings_rule(void) {
     [self.window makeKeyAndOrderFront:nil];
 }
 
+- (void)toggleMischiefOptions:(NSButton *)sender {
+    _mischiefOptions.hidden = sender.state != NSControlStateValueOn;
+}
+
 - (void)preferencesChanged:(id)sender {
     if (sender == _santaStepper) _santaMinutes.integerValue = _santaStepper.integerValue;
     if (sender == _mischiefStepper) _mischiefSeconds.integerValue = _mischiefStepper.integerValue;
+    if (sender == _thresholdStepper) _mischiefThreshold.integerValue = _thresholdStepper.integerValue;
     if (self.onChange) self.onChange((SnowPreferences){
         .intensity = _intensity.indexOfSelectedItem, .wind = _wind.indexOfSelectedItem - 1,
         .australia = _australia.state == NSControlStateValueOn, .santa = _santa.state == NSControlStateValueOn,
         .cleanupMinutes = [@[@0, @5, @15, @30][_cleanup.indexOfSelectedItem] integerValue],
         .santaMinutes = MAX(1, MIN(120, _santaMinutes.integerValue)),
-        .mischiefSeconds = MAX(0, MIN(60, _mischiefSeconds.integerValue))
+        .mischiefSeconds = MAX(0, MIN(60, _mischiefSeconds.integerValue)),
+        .mischiefThreshold = MAX(1, MIN(SnowMischiefMaxThreshold, _mischiefThreshold.integerValue))
     });
 }
 

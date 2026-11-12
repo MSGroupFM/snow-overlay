@@ -42,8 +42,72 @@ static void check_rolling_stack(void) {
     assert(scene.ball_count == 1 && scene.balls[0].offset == .1f && scene.flake_count > 20);
 }
 
+static void check_side_collision(bool inverted, bool moves_right, bool obstacle_in_front, bool slow) {
+    static SnowScene scene;
+    const SnowRect screen = {0, 0, 680, 450};
+    snow_init(&scene, screen, 42);
+    snow_set_inverted(&scene, inverted);
+    size_t moving = obstacle_in_front ? 1 : 0, obstacle = 1 - moving;
+    SnowSurface windows[2];
+    windows[moving] = (SnowSurface){7, {moves_right ? 40 : 374, 200, 160, 60}, true, 12};
+    windows[obstacle] = (SnowSurface){8, {260, 145, 70, 150}, true, 12};
+    snow_surfaces(&scene, windows, 2);
+    for (size_t i = 0; i < SNOW_BINS; i++) scene.drifts[moving].height[i] = 12;
+    /* A snow column can pass through the full obstacle between snapshots. */
+    if (slow) {
+        for (int i = 0; i < 120; i++) {
+            windows[moving].rect.x++;
+            snow_surfaces(&scene, windows, 2);
+        }
+    } else {
+        windows[moving].rect.x += moves_right ? 180 : -120;
+        snow_surfaces(&scene, windows, 2);
+    }
+    assert(scene.drifts[moving].height[moves_right ? 95 : 33] == 0);
+    assert(scene.drifts[moving].height[moves_right ? 12 : 115] > 10);
+    bool contact = false;
+    for (size_t i = 0; i < scene.flake_count; i++) {
+        SnowFlake flake = scene.flakes[i];
+        if (flake.falling_chunk && flake.skip == windows[moving].id) {
+            assert(moves_right ? flake.x < 260 && flake.vx < 0 : flake.x > 330 && flake.vx > 0);
+            contact = true;
+        }
+    }
+    assert(contact);
+}
+
+static void check_snowman_aim(float target_y) {
+    static SnowScene scene;
+    snow_init(&scene, (SnowRect){0, 0, 680, 450}, 42);
+    const SnowSurface window = {7, {100, 220, 200, 90}, true, 12};
+    snow_surfaces(&scene, &window, 1);
+    scene.balls[scene.ball_count++] = (SnowBall){7, .5f, 0, 14, 0};
+    scene.balls[scene.ball_count++] = (SnowBall){7, .5f, 28, 11, 0};
+    scene.balls[scene.ball_count++] = (SnowBall){7, .5f, 50, 9, 0};
+
+    const float target_x = 440;
+    snow_throw_snowmen(&scene, target_x, target_y);
+    assert(scene.flake_count == 1);
+    float closest = INFINITY;
+    for (int i = 0; i < 120; i++) {
+        snow_step(&scene, .01f, 0, 0);
+        for (size_t j = 0; j < scene.flake_count; j++) {
+            SnowFlake shot = scene.flakes[j];
+            if (shot.falling_chunk && shot.skip == window.id) {
+                closest = fminf(closest, hypotf(shot.x - target_x, shot.y - target_y));
+            }
+        }
+    }
+    assert(closest < 9);
+}
+
 int main(void) {
     check_rolling_stack();
+    check_side_collision(false, true, false, false);
+    check_side_collision(true, false, true, false);
+    check_side_collision(false, true, true, true);
+    check_snowman_aim(60);
+    check_snowman_aim(365);
     static SnowScene scene;
     const SnowSurface windows[] = {
         {14, {280, 150, 160, 260}, true, 3},

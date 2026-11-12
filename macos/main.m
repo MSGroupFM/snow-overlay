@@ -21,7 +21,6 @@ typedef NS_ENUM(NSInteger, DesktopSelection) {
 @property(nonatomic, copy) void (^leaveInteraction)(void);
 @property(nonatomic) NSTimeInterval particleFrameInterval;
 @property(nonatomic) BOOL separatesDraggedDrift;
-@property(nonatomic) NSTimeInterval mischiefDuration;
 - (instancetype)initWithScreen:(SnowRect)screen seed:(uint32_t)seed;
 - (void)hideDetachedDrift;
 - (void)beginCleanup:(SnowCleanup)style atTime:(NSTimeInterval)time;
@@ -32,7 +31,8 @@ typedef NS_ENUM(NSInteger, DesktopSelection) {
 - (void)restoreDesktopAccumulationAtSnowfallTime:(NSTimeInterval)time;
 - (void)clearDesktopAccumulation;
 - (BOOL)startSantaAtTime:(NSTimeInterval)time;
-- (void)advanceHolidayAtTime:(NSTimeInterval)time targetX:(CGFloat)x;
+- (void)configureMischiefDuration:(NSTimeInterval)duration threshold:(NSUInteger)threshold;
+- (void)advanceHolidayAtTime:(NSTimeInterval)time targetX:(CGFloat)x targetY:(CGFloat)y;
 - (void)resetHolidayEffects;
 - (void)render;
 - (void)renderWithDraggedWindow:(uint64_t)window horizontalOffset:(CGFloat)offset;
@@ -137,9 +137,10 @@ static bool update_drift_shape(DriftShape *previous, const SnowDrift *drift, boo
     SnowDesktop *_activeDesktop;
     BOOL _restoreDesktop;
     CALayer *_santaFlight;
-    NSTimeInterval _santaStarted, _santaDuration, _mischiefUntil, _nextVolley;
+    NSTimeInterval _santaStarted, _santaDuration, _mischiefDuration, _mischiefUntil, _nextVolley;
     CGFloat _santaMarks[3];
     NSUInteger _nextSantaMark, _growthSlot;
+    NSUInteger _brokenSnowmen, _mischiefThreshold;
     BOOL _santaGrewSnowman;
     SnowmanGrowth _growth[4];
 }
@@ -227,7 +228,7 @@ static CGImageRef flake_image(void) {
     if ([self isCleaningAtTime:CACurrentMediaTime()]) return;
     NSPoint p = [self scenePoint:event];
     SnowBreak result = snow_break_ball(_scene, p.x, p.y);
-    if (result == SNOW_BREAK_SNOWMAN) [self startMischiefAtTime:CACurrentMediaTime() nearX:p.x];
+    if (result == SNOW_BREAK_SNOWMAN) [self recordBrokenSnowmanAtTime:CACurrentMediaTime() nearX:p.x];
     if (result != SNOW_BREAK_NONE) return;
     if (![self canStartBallAt:p] && self.leaveInteraction) self.leaveInteraction();
 }
@@ -490,9 +491,18 @@ static CGImageRef flake_image(void) {
     return YES;
 }
 
-- (void)startMischiefAtTime:(NSTimeInterval)time nearX:(CGFloat)x {
-    if (self.mischiefDuration <= 0 || time < _mischiefUntil) return;
-    _mischiefUntil = time + self.mischiefDuration;
+- (void)configureMischiefDuration:(NSTimeInterval)duration threshold:(NSUInteger)threshold {
+    if (_mischiefDuration != duration || _mischiefThreshold != threshold) _brokenSnowmen = 0;
+    _mischiefDuration = duration;
+    _mischiefThreshold = threshold;
+    if (duration <= 0) _mischiefUntil = 0;
+}
+
+- (void)recordBrokenSnowmanAtTime:(NSTimeInterval)time nearX:(CGFloat)x {
+    if (_mischiefDuration <= 0 || time < _mischiefUntil) return;
+    if (++_brokenSnowmen < _mischiefThreshold) return;
+    _brokenSnowmen = 0;
+    _mischiefUntil = time + _mischiefDuration;
     _nextVolley = time + .45;
     BOOL hasSnowman = NO;
     for (size_t i = 0; i < _scene->ball_count && !hasSnowman; i++) {
@@ -501,7 +511,7 @@ static CGImageRef flake_image(void) {
     if (!hasSnowman) [self growSnowmanAtTime:time nearX:x range:fminf(360, _scene->screen.width * .27f)];
 }
 
-- (void)advanceHolidayAtTime:(NSTimeInterval)time targetX:(CGFloat)x {
+- (void)advanceHolidayAtTime:(NSTimeInterval)time targetX:(CGFloat)x targetY:(CGFloat)y {
     if (_santaFlight) {
         CGFloat progress = (time - _santaStarted) / _santaDuration;
         while (_nextSantaMark < 3 && progress >= _santaMarks[_nextSantaMark]) {
@@ -516,10 +526,10 @@ static CGImageRef flake_image(void) {
             _santaFlight = nil;
         }
     }
-    if (time >= _mischiefUntil || self.mischiefDuration <= 0) {
+    if (time >= _mischiefUntil) {
         _mischiefUntil = 0;
     } else if (time >= _nextVolley) {
-        snow_throw_snowmen(_scene, x);
+        snow_throw_snowmen(_scene, x, y);
         _nextVolley = time + .85;
     }
     for (NSUInteger i = 0; i < 4; i++) {
@@ -531,6 +541,7 @@ static CGImageRef flake_image(void) {
     [_santaFlight removeFromSuperlayer];
     _santaFlight = nil;
     _mischiefUntil = _nextVolley = 0;
+    _brokenSnowmen = 0;
     memset(_growth, 0, sizeof _growth);
 }
 
@@ -993,6 +1004,7 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
 @property(nonatomic) NSTimeInterval snowfallTime;
 @property(nonatomic) BOOL santaEnabled;
 @property(nonatomic) NSTimeInterval santaInterval, santaElapsed, mischiefDuration;
+@property(nonatomic) NSUInteger mischiefThreshold;
 @end
 
 @implementation SnowApp {
@@ -1015,6 +1027,7 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
     self.santaEnabled = preferences.santa;
     self.santaInterval = preferences.santaMinutes * 60;
     self.mischiefDuration = preferences.mischiefSeconds;
+    self.mischiefThreshold = preferences.mischiefThreshold;
     self.nextCleanup = SnowCleanupPlow;
     if ([NSProcessInfo.processInfo.arguments containsObject:@"--demo"]) {
         _demoStep = 1;
@@ -1170,7 +1183,8 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
 - (SnowPreferences)currentPreferences {
     return (SnowPreferences){
         self.intensity, self.wind, self.australia, self.santaEnabled,
-        (NSInteger)(self.cleanupInterval / 60), (NSInteger)(self.santaInterval / 60), (NSInteger)self.mischiefDuration
+        (NSInteger)(self.cleanupInterval / 60), (NSInteger)(self.santaInterval / 60),
+        (NSInteger)self.mischiefDuration, (NSInteger)self.mischiefThreshold
     };
 }
 
@@ -1223,7 +1237,11 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
         self.santaInterval = preferences.santaMinutes * 60;
     }
     self.mischiefDuration = preferences.mischiefSeconds;
-    for (SnowPanel *panel in self.panels) ((SnowView *)panel.contentView).mischiefDuration = self.mischiefDuration;
+    self.mischiefThreshold = preferences.mischiefThreshold;
+    for (SnowPanel *panel in self.panels) {
+        SnowView *view = (SnowView *)panel.contentView;
+        [view configureMischiefDuration:self.mischiefDuration threshold:self.mischiefThreshold];
+    }
     [self savePreferences];
 }
 
@@ -1391,7 +1409,7 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
         SnowRect rect = {frame.origin.x, self.primaryTop - NSMaxY(frame), frame.size.width, frame.size.height};
         SnowView *view = [[SnowView alloc] initWithScreen:rect seed:arc4random()];
         if (!view) continue;
-        view.mischiefDuration = self.mischiefDuration;
+        [view configureMischiefDuration:self.mischiefDuration threshold:self.mischiefThreshold];
         CGFloat backingScale = screen.backingScaleFactor;
         if (MAX(rect.width, rect.height) * backingScale >= 4800) {
             view.particleFrameInterval = 1.0 / 30;
@@ -1603,15 +1621,16 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
         SnowView *view = (SnowView *)panel.contentView;
         [view isCleaningAtTime:now];
         hasRunningScene = YES;
+        CGFloat targetY = snow_screen_y(view.scene, self.primaryTop - pointer.y);
         if (!self.interactive && NSPointInRect(pointer, panel.frame)) {
-            snow_sweep(view.scene, pointer.x, snow_screen_y(view.scene, self.primaryTop - pointer.y));
+            snow_sweep(view.scene, pointer.x, targetY);
         } else {
             view.scene->pointer_known = false;
         }
         for (int step = 0; step < steps; step++) {
             snow_step(view.scene, dt / steps, intensity, self.wind);
         }
-        [view advanceHolidayAtTime:now targetX:pointer.x];
+        [view advanceHolidayAtTime:now targetX:pointer.x targetY:targetY];
     }
     if (hasRunningScene) {
         static const double rates[] = {26.0 / 54, 1, 125.0 / 54};
