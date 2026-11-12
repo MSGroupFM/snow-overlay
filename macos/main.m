@@ -1162,7 +1162,7 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
 - (void)makeMenu {
     self.status = [NSStatusBar.systemStatusBar statusItemWithLength:NSVariableStatusItemLength];
     self.status.button.title = @"❄";
-    self.status.button.toolTip = @"Снегопад";
+    self.status.button.toolTip = [NSString stringWithFormat:@"Снегопад · %@", snow_version_label()];
     NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Снегопад"];
     menu.delegate = self;
     self.pauseItem = [self item:@"Пауза" action:@selector(togglePause:)];
@@ -1214,6 +1214,9 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
     NSMenuItem *settings = [self item:@"Настройки…" action:@selector(showSettings:)];
     settings.keyEquivalent = @",";
     [menu addItem:settings];
+    NSMenuItem *version = [[NSMenuItem alloc] initWithTitle:snow_version_label() action:nil keyEquivalent:@""];
+    version.enabled = NO;
+    [menu addItem:version];
     [menu addItem:[self item:@"Выход" action:@selector(quit:)]];
     self.status.menu = menu;
     [self updateMenu];

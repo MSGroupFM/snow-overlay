@@ -8,6 +8,17 @@ typedef struct {
 
 enum { SnowMischiefMaxThreshold = 20 };
 
+static NSString *snow_version_label(void) {
+    NSBundle *bundle = NSBundle.mainBundle;
+    NSString *version = [bundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
+    NSString *build = [bundle objectForInfoDictionaryKey:@"CFBundleVersion"];
+    if (!version.length) return @"Версия недоступна";
+    if (!build.length) return [NSString stringWithFormat:@"Версия %@", version];
+    return [NSString stringWithFormat:@"Версия %@ (сборка %@)", version, build];
+}
+
+static NSString *const snow_repository_url = @"https://github.com/MSGroupFM/snow-overlay";
+
 static NSArray<NSString *> *snow_cleanup_titles(void) {
     return @[@"Мгновенно", @"Снегоуборочная машина", @"Порыв ветра", @"Уборка лопатой", @"Лавина", @"Оттепель", @"Удар и погоня"];
 }
@@ -132,10 +143,28 @@ static NSView *settings_rule(void) {
     [banner.widthAnchor constraintEqualToConstant:532].active = YES;
     [banner.heightAnchor constraintEqualToConstant:78].active = YES;
     NSTextField *title = settings_label(@"Снегопад", [NSFont systemFontOfSize:25 weight:NSFontWeightSemibold], NSColor.whiteColor);
-    title.translatesAutoresizingMaskIntoConstraints = NO;
-    [banner addSubview:title];
-    [NSLayoutConstraint activateConstraints:@[[title.leadingAnchor constraintEqualToAnchor:banner.leadingAnchor constant:18],
-        [title.centerYAnchor constraintEqualToAnchor:banner.centerYAnchor]]];
+    NSTextField *version = settings_label(snow_version_label(), [NSFont systemFontOfSize:12],
+        [NSColor colorWithRed:.80 green:.86 blue:.93 alpha:1]);
+    NSButton *repo = [NSButton buttonWithTitle:@"GitHub" target:self action:@selector(openRepository:)];
+    repo.bordered = NO;
+    repo.toolTip = snow_repository_url;
+    [repo setAccessibilityLabel:@"Репозиторий «Снегопада» на GitHub"];
+    repo.attributedTitle = [[NSAttributedString alloc] initWithString:@"GitHub" attributes:@{
+        NSFontAttributeName: [NSFont systemFontOfSize:12],
+        NSForegroundColorAttributeName: [NSColor colorWithRed:.62 green:.82 blue:1 alpha:1],
+        NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)
+    }];
+    NSStackView *details = [NSStackView stackViewWithViews:@[version, repo]];
+    details.alignment = NSLayoutAttributeCenterY;
+    details.spacing = 12;
+    NSStackView *identity = [NSStackView stackViewWithViews:@[title, details]];
+    identity.orientation = NSUserInterfaceLayoutOrientationVertical;
+    identity.alignment = NSLayoutAttributeLeading;
+    identity.spacing = 4;
+    identity.translatesAutoresizingMaskIntoConstraints = NO;
+    [banner addSubview:identity];
+    [NSLayoutConstraint activateConstraints:@[[identity.leadingAnchor constraintEqualToAnchor:banner.leadingAnchor constant:18],
+        [identity.centerYAnchor constraintEqualToAnchor:banner.centerYAnchor]]];
     NSImage *sleigh = holiday_santa_image();
     if (sleigh) {
         NSImageView *preview = [NSImageView imageViewWithImage:sleigh];
@@ -251,4 +280,5 @@ static NSView *settings_rule(void) {
 - (void)controlTextDidEndEditing:(NSNotification *)note { [self preferencesChanged:note.object]; }
 - (void)runFlight:(id)sender { if (self.onFlight) self.onFlight(); }
 - (void)runCleanup:(id)sender { if (self.onCleanup) self.onCleanup(_effect.indexOfSelectedItem); }
+- (void)openRepository:(id)sender { [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:snow_repository_url]]; }
 @end
