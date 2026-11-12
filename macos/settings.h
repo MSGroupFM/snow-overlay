@@ -134,6 +134,8 @@ static NSView *settings_rule(void) {
     window.title = @"Настройки «Снегопада»";
     window.releasedWhenClosed = NO;
     window.tabbingMode = NSWindowTabbingModeDisallowed;
+    window.collectionBehavior = NSWindowCollectionBehaviorMoveToActiveSpace |
+                                NSWindowCollectionBehaviorFullScreenAuxiliary;
     self.window = window;
 
     NSView *banner = [NSView new];
@@ -248,15 +250,31 @@ static NSView *settings_rule(void) {
 
 - (void)showPreferences:(SnowPreferences)preferences paused:(BOOL)paused {
     if (!self.window) [self loadWindow];
-    if (!self.window.isVisible) {
+    NSWindow *window = self.window;
+    if (!window.isVisible) {
         _mischiefDisclosure.state = NSControlStateValueOff;
         [self toggleMischiefOptions:_mischiefDisclosure];
+    } else if (!window.isOnActiveSpace) {
+        [window orderOut:nil];
     }
+
+    NSPoint pointer = NSEvent.mouseLocation;
+    for (NSScreen *screen in NSScreen.screens) {
+        if (!NSPointInRect(pointer, screen.frame)) continue;
+        NSRect area = screen.visibleFrame;
+        NSRect frame = window.frame;
+        if (!NSContainsRect(area, frame)) {
+            [window setFrameOrigin:NSMakePoint(NSMidX(area) - NSWidth(frame) / 2,
+                                               NSMidY(area) - NSHeight(frame) / 2)];
+        }
+        break;
+    }
+
     [self refresh:preferences paused:paused];
-    [self showWindow:nil];
+    if (window.isMiniaturized) [window deminiaturize:nil];
+    [window makeKeyAndOrderFront:nil];
     if (@available(macOS 14.0, *)) [NSApp activate];
     else [NSApp activateIgnoringOtherApps:YES];
-    [self.window makeKeyAndOrderFront:nil];
 }
 
 - (void)toggleMischiefOptions:(NSButton *)sender {
