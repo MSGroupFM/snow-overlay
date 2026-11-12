@@ -184,6 +184,38 @@ static void holiday_shape(CGContextRef ctx, const CGPoint *points, size_t count)
     CGContextFillPath(ctx);
 }
 
+static CGImageRef snowball_texture(void) {
+    static CGImageRef image;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        CGColorSpaceRef color = CGColorSpaceCreateDeviceRGB();
+        CGContextRef ctx = CGBitmapContextCreate(NULL, 128, 128, 8, 0, color,
+                                                  (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
+        if (ctx) {
+            CGRect circle = CGRectMake(1, 1, 126, 126);
+            CGContextAddEllipseInRect(ctx, circle);
+            CGContextClip(ctx);
+            const CGFloat shades[] = {1, 1, 1, 1, .95, .98, 1, 1, .80, .89, .97, 1, .58, .72, .85, 1};
+            const CGFloat stops[] = {0, .38, .76, 1};
+            CGGradientRef light = CGGradientCreateWithColorComponents(color, shades, stops, 4);
+            CGContextDrawRadialGradient(ctx, light, CGPointMake(40, 88), 3, CGPointMake(65, 65), 70,
+                                        kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
+            CGGradientRelease(light);
+            for (int i = 0; i < 94; i++) {
+                CGFloat x = (i * 53) % 127, y = (i * 71) % 127;
+                CGContextSetRGBFillColor(ctx, .44, .62, .80, i % 3 == 0 ? .23 : .12);
+                CGContextFillEllipseInRect(ctx, CGRectMake(x, y, 1.7 + i % 3, 1.5 + i % 2));
+                CGContextSetRGBFillColor(ctx, 1, 1, 1, .53);
+                CGContextFillEllipseInRect(ctx, CGRectMake(x + 1, y + 1, 1.5, 1.5));
+            }
+            image = CGBitmapContextCreateImage(ctx);
+            CGContextRelease(ctx);
+        }
+        CGColorSpaceRelease(color);
+    });
+    return image;
+}
+
 static void holiday_coat(CGContextRef ctx, unsigned appearance) {
     static const CGFloat colors[SNOWMAN_APPEARANCES][3] = {
         {.31, .45, .54}, {.78, .17, .29}, {.14, .46, .37},
@@ -201,12 +233,24 @@ static void snowman_hat(CGContextRef ctx, unsigned appearance) {
         CGContextSetRGBFillColor(ctx, .49, .65, .74, 1);
         CGContextFillEllipseInRect(ctx, CGRectMake(37, 9, 53, 8));
         CGContextFillRect(ctx, CGRectMake(48, 18, 6, 17));
+        CGContextSetRGBStrokeColor(ctx, .30, .37, .44, 1);
+        CGContextSetLineWidth(ctx, 2.5);
+        CGContextMoveToPoint(ctx, 43, 24);
+        CGContextAddQuadCurveToPoint(ctx, 24, 32, 45, 42);
+        CGContextStrokePath(ctx);
+        CGContextSetRGBFillColor(ctx, .80, .89, .95, 1);
+        CGContextFillEllipseInRect(ctx, CGRectMake(40, 22, 5, 5));
+        CGContextFillEllipseInRect(ctx, CGRectMake(81, 22, 4, 5));
     } else if (appearance == 3) {
         CGContextSetRGBFillColor(ctx, .13, .20, .27, 1);
         CGContextFillRect(ctx, CGRectMake(44, 12, 40, 29));
         CGContextFillEllipseInRect(ctx, CGRectMake(35, 35, 58, 11));
         holiday_coat(ctx, appearance);
         CGContextFillRect(ctx, CGRectMake(44, 31, 40, 6));
+        CGContextSetRGBFillColor(ctx, .84, .68, .34, 1);
+        CGContextFillRect(ctx, CGRectMake(71, 31, 8, 6));
+        holiday_coat(ctx, appearance);
+        CGContextFillRect(ctx, CGRectMake(73, 32, 4, 4));
     } else if (appearance == 4) {
         CGContextSetRGBStrokeColor(ctx, .24, .31, .39, 1);
         CGContextSetLineWidth(ctx, 5);
@@ -215,6 +259,9 @@ static void snowman_hat(CGContextRef ctx, unsigned appearance) {
         holiday_coat(ctx, appearance);
         CGContextFillEllipseInRect(ctx, CGRectMake(29, 47, 14, 20));
         CGContextFillEllipseInRect(ctx, CGRectMake(85, 47, 14, 20));
+        CGContextSetRGBFillColor(ctx, 1, .87, .61, .60);
+        CGContextFillEllipseInRect(ctx, CGRectMake(31, 50, 8, 12));
+        CGContextFillEllipseInRect(ctx, CGRectMake(87, 50, 8, 12));
     } else {
         CGContextFillEllipseInRect(ctx, CGRectMake(39, 15, 50, 39));
         CGContextFillRect(ctx, CGRectMake(37, 36, 54, 10));
@@ -222,6 +269,7 @@ static void snowman_hat(CGContextRef ctx, unsigned appearance) {
         CGContextFillEllipseInRect(ctx, CGRectMake(58, 9, 13, 13));
         CGContextSetRGBFillColor(ctx, 1, 1, 1, .43);
         for (int i = 0; i < 7; i++) CGContextFillRect(ctx, CGRectMake(42 + i * 7, 37, 2, 7));
+        for (int i = 0; i < 5; i++) CGContextFillEllipseInRect(ctx, CGRectMake(48 + i * 7, 27 + abs(i - 2), 3, 2));
     }
 }
 
@@ -260,10 +308,14 @@ static CGImageRef snowman_details(SnowmanPart part, unsigned appearance, BOOL mi
         const CGPoint carrot[] = {{62, 60}, {100, 66}, {62, 72}};
         CGContextSetRGBFillColor(ctx, .96, .43, .13, 1);
         holiday_shape(ctx, carrot, 3);
+        CGContextSetRGBFillColor(ctx, 1, .64, .28, 1);
+        holiday_shape(ctx, (CGPoint[]){{63,60},{96,66},{63,65}}, 3);
         CGContextSetRGBStrokeColor(ctx, .78, .29, .10, .7);
         CGContextSetLineWidth(ctx, 1.2);
         CGContextMoveToPoint(ctx, 73, 63);
         CGContextAddLineToPoint(ctx, 75, 68);
+        CGContextMoveToPoint(ctx, 81, 64);
+        CGContextAddLineToPoint(ctx, 83, 68);
         CGContextStrokePath(ctx);
     } else {
         CGContextSetLineCap(ctx, kCGLineCapRound);
@@ -275,10 +327,19 @@ static CGImageRef snowman_details(SnowmanPart part, unsigned appearance, BOOL mi
         CGContextMoveToPoint(ctx, 88, 57);
         CGContextAddLineToPoint(ctx, 110, mischievous ? 38 : 48);
         CGContextAddLineToPoint(ctx, 116, mischievous ? 27 : 37);
+        CGContextMoveToPoint(ctx, 18, mischievous ? 40 : 49);
+        CGContextAddLineToPoint(ctx, 7, mischievous ? 38 : 47);
+        CGContextMoveToPoint(ctx, 110, mischievous ? 38 : 48);
+        CGContextAddLineToPoint(ctx, 121, mischievous ? 35 : 45);
         CGContextStrokePath(ctx);
         CGContextSetRGBFillColor(ctx, .18, .26, .33, 1);
         for (int i = 0; i < 3; i++) {
             CGContextFillEllipseInRect(ctx, CGRectMake(60, 51 + i * 12, 8, 8));
+        }
+        CGContextSetRGBFillColor(ctx, .52, .61, .68, .9);
+        for (int i = 0; i < 3; i++) {
+            CGContextFillEllipseInRect(ctx, CGRectMake(62, 52.5 + i * 12, 1.4, 1.4));
+            CGContextFillEllipseInRect(ctx, CGRectMake(64.5, 53 + i * 12, 1.4, 1.4));
         }
         if (appearance != 0) {
             holiday_coat(ctx, appearance);
@@ -289,6 +350,7 @@ static CGImageRef snowman_details(SnowmanPart part, unsigned appearance, BOOL mi
             CGContextFillEllipseInRect(ctx, CGRectMake(43, 35, 35, 3));
             CGContextFillRect(ctx, CGRectMake(74, 54, 10, 2));
             CGContextFillRect(ctx, CGRectMake(75, 59, 10, 2));
+            for (int i = 0; i < 4; i++) CGContextFillRect(ctx, CGRectMake(74 + i * 3, 63 + i, 1.3, 4));
         }
     }
     CGImageRef image = CGBitmapContextCreateImage(ctx);

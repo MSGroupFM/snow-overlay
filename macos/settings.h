@@ -7,7 +7,7 @@ typedef struct {
 } SnowPreferences;
 
 static NSArray<NSString *> *snow_cleanup_titles(void) {
-    return @[@"Мгновенно", @"Снегоуборочная машина", @"Порыв ветра", @"Удар и лопата", @"Лавина", @"Оттепель"];
+    return @[@"Мгновенно", @"Снегоуборочная машина", @"Порыв ветра", @"Уборка лопатой", @"Лавина", @"Оттепель", @"Удар и погоня"];
 }
 
 static SnowPreferences snow_read_preferences(NSUserDefaults *defaults) {

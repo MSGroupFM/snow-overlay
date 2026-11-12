@@ -541,10 +541,11 @@ static CGImageRef flake_image(void) {
     [CATransaction setDisableActions:YES];
     if (style != SnowCleanupImmediate && self.window.isVisible && self.window.isOnActiveSpace) {
         CGFloat width = NSWidth(self.bounds), height = NSHeight(self.bounds);
-        BOOL groundPass = style == SnowCleanupPlow || style == SnowCleanupShovel;
+        BOOL groundPass = style == SnowCleanupPlow || style == SnowCleanupShovel || style == SnowCleanupBoulder;
         CFTimeInterval duration = 1.55;
         if (style == SnowCleanupPlow) duration = MAX(3.2, MIN(5.4, 1.3 + width / 700));
         if (style == SnowCleanupShovel) duration = MAX(3.8, MIN(6.0, 1.4 + width / 560));
+        if (style == SnowCleanupBoulder) duration = MAX(4.4, MIN(5.8, 1.8 + width / 660));
         _cleanupUntil = time + duration;
         _cleanupLayer = [CALayer layer];
         _cleanupLayer.frame = self.bounds;
@@ -611,15 +612,21 @@ static CGImageRef flake_image(void) {
                 cleanup_drift_particles(particles, style, old.frame, edge, fall, direction, width, duration);
                 continue;
             } else {
-                CGFloat jump = style == SnowCleanupShovel ? 34 * direction : 0;
+                CGFloat jump = style == SnowCleanupBoulder ? 37 * direction : 0;
                 CGFloat sway = style == SnowCleanupAvalanche ? direction * 58 : 0;
                 positions = @[[NSValue valueWithPoint:origin],
                               [NSValue valueWithPoint:CGPointMake(origin.x, origin.y - jump)],
                               [NSValue valueWithPoint:CGPointMake(origin.x + sway, origin.y + fall)],
                               [NSValue valueWithPoint:CGPointMake(origin.x + sway, origin.y + fall)]];
-                if (style == SnowCleanupPlow || style == SnowCleanupShovel) {
-                    times = @[@0, @.13, @.37, @1];
-                    opacity = @[@1, @1, @1, @1];
+                if (groundPass) {
+                    if (style == SnowCleanupBoulder) {
+                        times = @[@0, @.10, @.15, @.37, @1];
+                        positions = @[[NSValue valueWithPoint:origin], positions[0], positions[1], positions[2], positions[3]];
+                        opacity = @[@1, @1, @1, @1, @1];
+                    } else {
+                        times = @[@0, @.045, @.37, @1];
+                        opacity = @[@1, @1, @1, @1];
+                    }
                 } else {
                     CGFloat lag = .28 * MIN(1, fabs(fall) / MAX(1, height));
                     times = @[@0, @(.04 + lag), @(.56 + lag), @1];
@@ -633,7 +640,7 @@ static CGImageRef flake_image(void) {
             CGFloat profile[CLEANUP_SNOW_SAMPLES] = {0};
             cleanup_snow_profile(_scene, profile);
             cleanup_ground_pass(_cleanupLayer, banks, style, profile, width, ground, direction, duration);
-            if (style == SnowCleanupShovel) cleanup_ice_impact(_cleanupLayer, width * .65, ground, direction, duration);
+            if (style == SnowCleanupBoulder) cleanup_ice_impact(_cleanupLayer, width * .55, ground, direction, duration);
         }
     }
     [self resetSnowScene];
@@ -769,9 +776,8 @@ static CGImageRef flake_image(void) {
              appearance:(unsigned)appearance mischievous:(BOOL)mischievous opacity:(CGFloat)opacity {
     if (index >= _balls.count) {
         CALayer *ball = [CALayer layer];
-        ball.backgroundColor = [NSColor colorWithRed:.74 green:.85 blue:.95 alpha:1].CGColor;
         CALayer *light = [CALayer layer];
-        light.backgroundColor = [NSColor colorWithRed:.97 green:.99 blue:1 alpha:1].CGColor;
+        light.contents = (__bridge id)snowball_texture();
         [ball addSublayer:light];
         [_ballGroup addSublayer:ball];
         [_balls addObject:ball];
@@ -784,8 +790,7 @@ static CGImageRef flake_image(void) {
     if (ball.cornerRadius != radius) {
         ball.bounds = CGRectMake(0, 0, radius * 2, radius * 2);
         ball.cornerRadius = radius;
-        light.frame = CGRectMake(.09f * radius, .13f * radius, 1.56f * radius, 1.56f * radius);
-        light.cornerRadius = .78f * radius;
+        light.frame = ball.bounds;
     }
     CALayer *details = ball.sublayers.count > 1 ? ball.sublayers.lastObject : nil;
     if (part == SNOWMAN_HEAD || part == SNOWMAN_BODY) {
@@ -998,6 +1003,8 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
     uint64_t _geometryGeneration;
     NSArray<NSDictionary *> *_pendingWindowGeometry;
     NSPoint _pendingGeometryPointer;
+    NSUInteger _demoStep;
+    NSTimeInterval _demoNext;
 }
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     SnowPreferences preferences = snow_read_preferences(NSUserDefaults.standardUserDefaults);
@@ -1009,6 +1016,10 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
     self.santaInterval = preferences.santaMinutes * 60;
     self.mischiefDuration = preferences.mischiefSeconds;
     self.nextCleanup = SnowCleanupPlow;
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"--demo"]) {
+        _demoStep = 1;
+        _demoNext = CACurrentMediaTime() + 4;
+    }
     [self makeMenu];
     [self configureScreens:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(configureScreens:)
@@ -1239,6 +1250,35 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
     if (started) self.santaElapsed = 0;
     return started;
 }
+
+- (void)advanceDemoAtTime:(NSTimeInterval)time {
+    for (SnowPanel *panel in self.panels) {
+        SnowView *view = (SnowView *)panel.contentView;
+        if (!panel.isVisible || !view.isOnActiveDesktop) continue;
+        SnowScene *scene = view.scene;
+        for (size_t i = 0; i < scene->drift_count; i++) {
+            SnowDrift *drift = &scene->drifts[i];
+            for (size_t bin = 0; bin < SNOW_BINS; bin++) {
+                CGFloat mound = 8.5 + 3.1 * sin(bin * .21 + i * .8) + 2 * cos(bin * .47);
+                drift->height[bin] = fmaxf(drift->height[bin], mound);
+            }
+            drift->revision = ++scene->revision;
+        }
+    }
+    if (_demoStep == 1) {
+        if (![self beginSantaAtTime:time]) {
+            _demoNext = time + 1;
+            return;
+        }
+        _demoNext = time + 17;
+    } else {
+        const SnowCleanup sequence[] = {SnowCleanupPlow, SnowCleanupShovel, SnowCleanupBoulder};
+        [self clearWithStyle:sequence[_demoStep - 2] atTime:time];
+        _demoNext = time + 11;
+    }
+    _demoStep = _demoStep == 4 ? 0 : _demoStep + 1;
+}
+
 - (void)clear:(NSMenuItem *)sender {
     [self clearWithStyle:sender.tag atTime:CACurrentMediaTime()];
 }
@@ -1578,6 +1618,10 @@ static void observe_drag(WindowDrag *drag, CGRect frame, CGPoint pointer) {
         self.cleanupElapsed += dt;
         self.snowfallTime += dt * rates[intensity];
         if (self.santaEnabled) self.santaElapsed += dt;
+    }
+    if (hasRunningScene && _demoStep && now >= _demoNext && !_desktopSelectionPending && !self.interactive && !down) {
+        [self advanceDemoAtTime:now];
+        return;
     }
     if (self.cleanupInterval && self.cleanupElapsed >= self.cleanupInterval && !_desktopSelectionPending && !self.interactive && !down) {
         [self clearWithStyle:self.nextCleanup atTime:now];

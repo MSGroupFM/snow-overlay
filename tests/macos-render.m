@@ -319,6 +319,11 @@ static void check_desktop_change_replaces_snow_panel(void) {
     [app.panels.firstObject close];
 }
 
+static CALayer *named_layer(CALayer *parent, NSString *name) {
+    for (CALayer *layer in parent.sublayers) if ([layer.name isEqualToString:name]) return layer;
+    return nil;
+}
+
 static void check_cleanup_effects(bool inverted) {
     SnowPanel *panel = [[SnowPanel alloc] initWithContentRect:NSMakeRect(90, 140, 420, 320)
                                                   styleMask:NSWindowStyleMaskBorderless
@@ -336,8 +341,10 @@ static void check_cleanup_effects(bool inverted) {
     assert(panel.isVisible);
     for (SnowCleanup effect = SnowCleanupImmediate; effect < SnowCleanupCount; effect++) {
         snow_surfaces(scene, &surface, 1);
-        for (size_t i = 0; i < SNOW_BINS; i++) scene->drifts[0].height[i] = 8;
-        scene->drifts[0].revision = ++scene->revision;
+        for (size_t i = 0; i < scene->drift_count; i++) {
+            for (size_t j = 0; j < SNOW_BINS; j++) scene->drifts[i].height[j] = 8;
+            scene->drifts[i].revision = ++scene->revision;
+        }
         scene->flakes[scene->flake_count++] = (SnowFlake){.x = 180, .y = 140, .radius = 4};
         scene->balls[scene->ball_count++] = (SnowBall){11, .4f, 0, 10, 0};
         scene->budget = .5;
@@ -348,6 +355,32 @@ static void check_cleanup_effects(bool inverted) {
         assert([view isCleaningAtTime:start + .5] == animated);
         assert(view.layer.sublayers.count == (animated ? 4 : 3));
         if (animated) assert(view.layer.sublayers.lastObject.sublayers.count >= 2);
+        CALayer *visual = view.layer.sublayers.lastObject;
+        if (effect == SnowCleanupPlow) {
+            CALayer *wheelSpray = named_layer(visual, @"cleanup-wheel-spray");
+            assert(wheelSpray.sublayers.count > 0 && wheelSpray.sublayers.count <= 72);
+            CAAnimationGroup *group = (CAAnimationGroup *)[wheelSpray.sublayers.firstObject animationForKey:@"cleanup"];
+            CAKeyframeAnimation *motion = (CAKeyframeAnimation *)group.animations.firstObject;
+            NSPoint tire = [motion.values[1] pointValue], apex = [motion.values[2] pointValue];
+            assert(apex.x < tire.x && (inverted ? apex.y > tire.y : apex.y < tire.y));
+        }
+        if (effect == SnowCleanupBoulder || effect == SnowCleanupShovel) {
+            BOOL chase = effect == SnowCleanupBoulder;
+            assert((named_layer(visual, @"cleanup-impact") != nil) == chase);
+            CALayer *windowBank = named_layer(visual, @"cleanup-banks").sublayers.lastObject;
+            CAAnimationGroup *group = (CAAnimationGroup *)[windowBank animationForKey:@"cleanup"];
+            CAKeyframeAnimation *motion = (CAKeyframeAnimation *)group.animations.firstObject;
+            NSPoint original = [motion.values[0] pointValue], hold = [motion.values[1] pointValue];
+            NSPoint next = [motion.values[2] pointValue];
+            assert(NSEqualPoints(original, hold));
+            assert(chase == (inverted ? next.y > original.y : next.y < original.y));
+            if (chase) {
+                CALayer *explorer = named_layer(visual, @"cleanup-explorer");
+                CALayer *boulder = named_layer(visual, @"cleanup-boulder");
+                assert([explorer animationForKey:@"run"] && [boulder animationForKey:@"roll"]);
+                assert(explorer.position.x > boulder.position.x);
+            }
+        }
         assert(!scene->flake_count && !scene->ball_count && !scene->budget && !scene->previous[0].height[42]);
         assert(scene->drift_count == 1 && scene->drifts[0].height[42] == 0 && scene->inverted == inverted);
         app.lastFrame = 0;
@@ -355,8 +388,8 @@ static void check_cleanup_effects(bool inverted) {
         [app renderFrameAt:start + .07 pointer:NSZeroPoint buttonDown:NO lowPower:NO];
         assert(scene->flake_count > 0);
         assert([view isCleaningAtTime:start + .08] == animated);
-        [app renderFrameAt:start + 4 pointer:NSZeroPoint buttonDown:NO lowPower:NO];
-        assert(![view isCleaningAtTime:start + 4] && view.layer.sublayers.count == 3);
+        [app renderFrameAt:start + 7 pointer:NSZeroPoint buttonDown:NO lowPower:NO];
+        assert(![view isCleaningAtTime:start + 7] && view.layer.sublayers.count == 3);
         assert(scene->flake_count > 0 && panel.isVisible);
     }
     [panel close];
